@@ -132,6 +132,7 @@ from torchbenchmark.util.triton_op import (
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch", type=int, default=4, help="Batch size")
+    parser.add_argument("--seq-len", type=int, default=11, help="Batch size")
     parser.add_argument("--n-heads", type=int, default=48, help="Number of heads")
     parser.add_argument("--d-head", type=int, default=64, help="specify head dimension")
     parser.add_argument("--causal", action="store_true", help="enable causal")
@@ -152,6 +153,7 @@ class Operator(BenchmarkOperator):
         args = parse_op_args(self.extra_args)
         self.use_cuda_graphs = False
         self.BATCH = args.batch
+        self.SEQ_LEN = args.seq_len
         self.H = args.n_heads
         self.D_HEAD = args.d_head
         self.N_CTX = None
@@ -388,10 +390,11 @@ class Operator(BenchmarkOperator):
 
     def get_input_iter(self) -> Generator:
         D_HEAD = self.D_HEAD
-        ctx_vals = [2**i for i in range(9, 15)]
+        BATCH = self.BATCH
+        ctx_vals = [2**i for i in range(self.SEQ_LEN, 19)] #2048
         requires_grad = True
         for N_CTX in ctx_vals:
-            BATCH = 16384 // N_CTX
+            #BATCH = 16384 // N_CTX
             H = 2048 // D_HEAD
             q = torch.randn(
                 (BATCH, H, N_CTX, D_HEAD),
