@@ -34,6 +34,7 @@ It benchmarks the following FMHA kernels:
 import argparse
 import math
 import os
+import sys
 
 import torch
 import triton  # @manual=//triton:triton
@@ -53,6 +54,7 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 from torchbenchmark import add_ld_library_path
 from torchbenchmark.util.kernels.triton_fused_attention import (
     attention as triton_tutorial_FA2,
+    attention_notma as triton_tutorial_FA2_notma,
     attention_tma as triton_tutorial_FA2_tma,
 )
 
@@ -242,6 +244,15 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
+        #out0 = triton_tutorial_FA2(q, k, v, self.causal, self.sm_scale)
+        #print("done running WS")
+        #out1 = triton_tutorial_FA2_notma(q, k, v, self.causal, self.sm_scale)
+        #print("results with WS")
+        #torch.set_printoptions(threshold=sys.maxsize)
+        #print(out0[0,0,0:128,0:128])
+        #print("results without WS with NOTMA")
+        #print(out1[0,0,0:128,0:128])
+        #torch.testing.assert_close(out0, out1)
         return lambda: triton_tutorial_FA2(q, k, v, self.causal, self.sm_scale)
 
     @register_benchmark(enabled=HAS_CUDA_124)
@@ -252,6 +263,15 @@ class Operator(BenchmarkOperator):
         v: torch.Tensor,
     ) -> Callable:
         return lambda: triton_tutorial_FA2_tma(q, k, v, self.causal, self.sm_scale)
+
+    @register_benchmark(enabled=HAS_CUDA_124)
+    def triton_tutorial_flash_v2_notma(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: triton_tutorial_FA2_notma(q, k, v, self.causal, self.sm_scale)
 
     @register_benchmark(enabled=HAS_KERNELS)
     def triton_op_flash_v2(
