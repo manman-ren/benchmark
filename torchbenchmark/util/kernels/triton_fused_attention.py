@@ -143,7 +143,7 @@ def _attn_fwd_inner(
     K_block_ptr = tl.advance(K_block_ptr, (0, lo))
     V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
     # loop over k, v and update accumulator
-    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl.load(K_block_ptr)
@@ -180,23 +180,31 @@ def _attn_fwd_inner(
 # We don't run auto-tuning every time to keep the tutorial fast. Uncommenting
 # the code below and commenting out the equivalent parameters is convenient for
 # re-tuning.
-configs = [
+configsWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp)
     for BM in [64]
     for BN in [128]
-    for s in [2]
+    for s in [0] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2]
 ]
-configsTma = [
+configsNoWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
     for BM in [128]
     for BN in [128]
     for s in [3]
     for w in [8]
 ]
-
+configsTma = [
+    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp)
+    for BM in [64]
+    for BN in [128]
+    for s in [0] # change to 2 if firstDot or secondDot
+    for w in [4]
+    for buf in [2]
+    for grp in [2] # 2
+]
 
 def keep(conf):
     BLOCK_M = conf.kwargs["BLOCK_M"]
@@ -206,7 +214,7 @@ def keep(conf):
     return True
 
 
-@triton.autotune(list(filter(keep, configs)), key=["N_CTX"])
+@triton.autotune(list(filter(keep, configsWS)), key=["N_CTX"])
 @triton.jit
 def _attn_fwd(
     Q,
@@ -408,7 +416,7 @@ def _attn_fwd_inner_notma(
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
 
-@triton.autotune(list(filter(keep, configsTma)), key=["N_CTX"])
+@triton.autotune(list(filter(keep, configsNoWS)), key=["N_CTX"])
 @triton.jit
 def _attn_fwd_notma(
     Q,
@@ -580,7 +588,7 @@ def _attn_fwd_inner_tma(
     else:
         lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
-    for start_n in range(lo, hi, BLOCK_N):
+    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl._experimental_descriptor_load(  # load in row major
@@ -1464,7 +1472,7 @@ class _attention_tma(torch.autograd.Function):
                 o.element_size(),
             )
             return (
-                triton.cdiv(q.shape[2], META["BLOCK_M"]),
+                triton.cdiv(q.shape[2], 2*META["BLOCK_M"]), # num_consumer_groups
                 q.shape[0] * q.shape[1],
                 1,
             )

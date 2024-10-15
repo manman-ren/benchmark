@@ -262,6 +262,19 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
+        # wgId 1 has correct results, wgId 2 has 0.0
+        #out0 = triton_tutorial_FA2_tma(q, k, v, self.causal, self.sm_scale)
+        #print("done running WS")
+        #out1 = triton_tutorial_FA2_notma(q, k, v, self.causal, self.sm_scale)
+        #print("results with WS")
+        #torch.set_printoptions(threshold=sys.maxsize)
+        #print(out0[0,0,64:128,0:128])
+        #print("results with WS 192")
+        #print(out0[0,0,192:256,0:128])
+        #print("results without WS with NOTMA")
+        #print(out1[0,0,64:128,0:128])
+        #torch.testing.assert_close(out0[0,0,0:64,0:128], out1[0,0,0:64,0:128]);
+        #torch.testing.assert_close(out0, out1)
         return lambda: triton_tutorial_FA2_tma(q, k, v, self.causal, self.sm_scale)
 
     @register_benchmark(enabled=HAS_CUDA_124)
