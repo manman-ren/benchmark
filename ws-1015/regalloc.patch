@@ -1,0 +1,26 @@
+diff --git a/torchbenchmark/util/kernels/triton_fused_attention.py b/torchbenchmark/util/kernels/triton_fused_attention.py
+index fda1c574..f8236773 100644
+--- a/torchbenchmark/util/kernels/triton_fused_attention.py
++++ b/torchbenchmark/util/kernels/triton_fused_attention.py
+@@ -188,8 +188,8 @@ configsWS = [
+     for w in [4]
+     for buf in [2]
+     for grp in [2]
+-    for dec in [40] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
+-    for inc in [232] #[240, 232, 224] 40, 240 hangs
++    for dec in [24] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
++    for inc in [240] #[240, 232, 224] 40, 240 hangs
+ ]
+ configsNoWS = [
+     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
+@@ -206,8 +206,8 @@ configsTma = [
+     for w in [4]
+     for buf in [2]
+     for grp in [2] # 2
+-    for dec in [40] #[32, 40, 48]
+-    for inc in [232] #[224, 232, 240]
++    for dec in [24] #[32, 40, 48]
++    for inc in [240] #[224, 232, 240]
+ ]
+ 
+ def keep(conf):

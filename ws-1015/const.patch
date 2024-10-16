@@ -1,0 +1,22 @@
+diff --git a/torchbenchmark/util/kernels/triton_fused_attention.py b/torchbenchmark/util/kernels/triton_fused_attention.py
+index fda1c574..285120a8 100644
+--- a/torchbenchmark/util/kernels/triton_fused_attention.py
++++ b/torchbenchmark/util/kernels/triton_fused_attention.py
+@@ -245,7 +245,7 @@ def _attn_fwd(
+     stride_on,  #
+     Z,
+     H,
+-    N_CTX,#: tl.constexpr,  #
++    N_CTX: tl.constexpr,  #
+     BLOCK_M: tl.constexpr,  #
+     BLOCK_N: tl.constexpr,  #
+     HEAD_DIM: tl.constexpr,  #
+@@ -674,7 +674,7 @@ def _attn_fwd_tma(  # Q, V, desc_k, desc_v, sm_scale, M, Out,  #
+     stride_on,  #
+     Z,
+     H,
+-    N_CTX,  #
++    N_CTX: tl.constexpr,  #
+     BLOCK_M: tl.constexpr,  #
+     BLOCK_N: tl.constexpr,  #
+     HEAD_DIM: tl.constexpr,  #

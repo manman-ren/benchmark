@@ -1,0 +1,40 @@
+diff --git a/torchbenchmark/util/kernels/triton_fused_attention.py b/torchbenchmark/util/kernels/triton_fused_attention.py
+index fda1c574..6c6e0991 100644
+--- a/torchbenchmark/util/kernels/triton_fused_attention.py
++++ b/torchbenchmark/util/kernels/triton_fused_attention.py
+@@ -143,7 +143,7 @@ def _attn_fwd_inner(
+     K_block_ptr = tl.advance(K_block_ptr, (0, lo))
+     V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
+     # loop over k, v and update accumulator
+-    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
++    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+         start_n = tl.multiple_of(start_n, BLOCK_N)
+         # -- compute qk ----
+         k = tl.load(K_block_ptr)
+@@ -184,7 +184,7 @@ configsWS = [
+     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
+     for BM in [64]
+     for BN in [128]
+-    for s in [0] # change to 2 if firstDot or secondDot
++    for s in [2] # change to 2 if firstDot or secondDot
+     for w in [4]
+     for buf in [2]
+     for grp in [2]
+@@ -202,7 +202,7 @@ configsTma = [
+     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
+     for BM in [64]
+     for BN in [128]
+-    for s in [0] # change to 2 if firstDot or secondDot
++    for s in [2] # change to 2 if firstDot or secondDot
+     for w in [4]
+     for buf in [2]
+     for grp in [2] # 2
+@@ -592,7 +592,7 @@ def _attn_fwd_inner_tma(
+     else:
+         lo, hi = 0, N_CTX
+     # loop over k, v and update accumulator
+-    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
++    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+         start_n = tl.multiple_of(start_n, BLOCK_N)
+         # -- compute qk ----
+         k = tl._experimental_descriptor_load(  # load in row major
