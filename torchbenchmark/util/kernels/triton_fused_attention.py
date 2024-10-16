@@ -181,13 +181,15 @@ def _attn_fwd_inner(
 # the code below and commenting out the equivalent parameters is convenient for
 # re-tuning.
 configsWS = [
-    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp)
+    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
     for BM in [64]
     for BN in [128]
     for s in [0] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2]
+    for dec in [40] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
+    for inc in [232] #[240, 232, 224] 40, 240 hangs
 ]
 configsNoWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
@@ -197,13 +199,15 @@ configsNoWS = [
     for w in [8]
 ]
 configsTma = [
-    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp)
+    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
     for BM in [64]
     for BN in [128]
     for s in [0] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2] # 2
+    for dec in [40] #[32, 40, 48]
+    for inc in [232] #[224, 232, 240]
 ]
 
 def keep(conf):
