@@ -143,7 +143,7 @@ def _attn_fwd_inner(
     K_block_ptr = tl.advance(K_block_ptr, (0, lo))
     V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
     # loop over k, v and update accumulator
-    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl.load(K_block_ptr)
@@ -184,12 +184,12 @@ configsWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
     for BM in [64]
     for BN in [128]
-    for s in [0] # change to 2 if firstDot or secondDot
+    for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2]
-    for dec in [40] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
-    for inc in [232] #[240, 232, 224] 40, 240 hangs
+    for dec in [24] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
+    for inc in [240] #[240, 232, 224] 40, 240 hangs
 ]
 configsNoWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
@@ -202,12 +202,12 @@ configsTma = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
     for BM in [64]
     for BN in [128]
-    for s in [0] # change to 2 if firstDot or secondDot
+    for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2] # 2
-    for dec in [40] #[32, 40, 48]
-    for inc in [232] #[224, 232, 240]
+    for dec in [24] #[32, 40, 48]
+    for inc in [240] #[224, 232, 240]
 ]
 
 def keep(conf):
@@ -592,7 +592,7 @@ def _attn_fwd_inner_tma(
     else:
         lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
-    for start_n in tl.range(lo, hi, BLOCK_N): #, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl._experimental_descriptor_load(  # load in row major
