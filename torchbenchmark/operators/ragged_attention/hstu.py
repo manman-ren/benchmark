@@ -10,6 +10,7 @@ try:
         _ragged_hstu_attn_fwd,
         _ragged_hstu_attn_fwd_persistent,
         _ragged_hstu_attn_fwd_tma,
+        _ragged_hstu_attn_fwd_ws,
     )
 except ModuleNotFoundError:
     # OSS Import
@@ -25,6 +26,9 @@ except ModuleNotFoundError:
         )
         _ragged_hstu_attn_fwd_tma = (
             triton_ragged_hstu_attention._ragged_hstu_attn_fwd_tma
+        )
+        _ragged_hstu_attn_fwd_ws = (
+            triton_ragged_hstu_attention._ragged_hstu_attn_fwd_ws
         )
 
 from typing import Tuple
@@ -130,6 +134,7 @@ class RaggedHSTUAttn(torch.nn.Module):
         num_buckets,
         persistent_kernel: bool = False,
         enable_tma: bool = False,
+        enable_ws: bool = False,
     ) -> None:
         self.batch_size = batch_size
         self.num_heads = num_heads
@@ -150,6 +155,7 @@ class RaggedHSTUAttn(torch.nn.Module):
         )
         self.persistent_kernel = persistent_kernel
         self.enable_tma = enable_tma
+        self.enable_ws = enable_ws
 
     def forward(
         self, qkv: torch.Tensor, seq_offsets: torch.Tensor, timestamps: torch.Tensor
@@ -301,6 +307,8 @@ class RaggedHSTUAttn(torch.nn.Module):
             # pyre-fixme[16]: Module `triton_ragged_hstu_attention` has no attribute
             if self.enable_tma:
                 _ragged_hstu_attn_fwd_tma[grid_tma](**kwargs)
+            elif self.enable_ws:
+                _ragged_hstu_attn_fwd_ws[grid_tma](**kwargs)
             else:
                 _ragged_hstu_attn_fwd[grid_tma](**kwargs)
 
