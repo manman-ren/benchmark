@@ -182,7 +182,7 @@ def _attn_fwd_inner(
 # re-tuning.
 configsWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
-    for BM in [64]
+    for BM in [128] # 128 with data partitioning, 64 with grid partitioning
     for BN in [128]
     for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
@@ -200,7 +200,7 @@ configsNoWS = [
 ]
 configsTma = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
-    for BM in [64]
+    for BM in [128] # 128 with data partitioning, 64 with grid partitioning
     for BN in [128]
     for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
@@ -1138,7 +1138,9 @@ class _attention(torch.autograd.Function):
         extra_kern_args = {}
 
         grid = lambda args: (
-            triton.cdiv(q.shape[2], 2*args["BLOCK_M"]), # num_consumer_groups, or 1 for debugging
+            # grid partitioning: num_consumer_groups * BLOCK_M
+            # data partitioning: BLOCK_M
+            triton.cdiv(q.shape[2], args["BLOCK_M"]), # num_consumer_groups, or 1 for debugging
             q.shape[0] * q.shape[1],
             1,
         )
@@ -1462,7 +1464,7 @@ class _attention_tma(torch.autograd.Function):
                 q.data_ptr(),
                 BATCH * H * N_CTX,
                 HEAD_DIM_Q,
-                META["BLOCK_M"],
+                META["BLOCK_M"] // 2, # data partitioning: halve
                 HEAD_DIM_Q,
                 q.element_size(),
             )
@@ -1471,12 +1473,14 @@ class _attention_tma(torch.autograd.Function):
                 o.data_ptr(),
                 BATCH * H * N_CTX,
                 HEAD_DIM_Q,
-                META["BLOCK_M"],
+                META["BLOCK_M"] // 2, # data partitioning: halve
                 HEAD_DIM_Q,
                 o.element_size(),
             )
             return (
-                triton.cdiv(q.shape[2], 2*META["BLOCK_M"]), # num_consumer_groups
+                # grid partitioning: num_consumer_groups * BLOCK_M
+                # data partitioning: BLOCK_M
+                triton.cdiv(q.shape[2], META["BLOCK_M"]), # num_consumer_groups
                 q.shape[0] * q.shape[1],
                 1,
             )
