@@ -213,7 +213,7 @@ class RaggedHSTUAttn(torch.nn.Module):
                 "q",
                 q.data_ptr(),
                 L, H * DimQ,
-                META["BLOCK_M"],
+                META["BLOCK_M"] // 2, # data partitioning
                 BLOCK_D_Q,
                 q.element_size(),
             )
@@ -221,7 +221,7 @@ class RaggedHSTUAttn(torch.nn.Module):
                 "o",
                 out.data_ptr(),
                 L, H * DimV,
-                META["BLOCK_M"],
+                META["BLOCK_M"] // 2, # data partitioning
                 BLOCK_D_V,
                 out.element_size(),
             )
@@ -328,9 +328,12 @@ def get_test_inputs(
     )
     timestamps = timestamp_deltas.cumsum(dim=1)
 
+    # sparsity >= 0.5
+    sparsity = 0.8
+    min_seq_len: int = int((2 * sparsity - 1.0) * max_seq_len)
     lengths = (
         torch.randint(
-            max_seq_len + 1,
+            low=min_seq_len, high=max_seq_len, #max_seq_len - 10, max_seq_len + 1,
             size=(batch_size,),
         )
         .requires_grad_(False)
