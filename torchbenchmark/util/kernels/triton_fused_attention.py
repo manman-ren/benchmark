@@ -11,6 +11,7 @@ Extra Credits:
 
 """
 
+import os
 import sys
 
 import numpy as np
@@ -21,6 +22,7 @@ import triton.language as tl
 
 # check if we have the TMA version in Triton PR #4498 (https://github.com/triton-lang/triton/pull/4498).
 HAS_TMA_DESC = "nv_tma_desc_type" in dir(tl)
+DATA_PARTITION = os.getenv("DATA_PARTITION_FA")
 
 if HAS_TMA_DESC:
     print(
@@ -180,16 +182,23 @@ def _attn_fwd_inner(
 # We don't run auto-tuning every time to keep the tutorial fast. Uncommenting
 # the code below and commenting out the equivalent parameters is convenient for
 # re-tuning.
+BMIter = [128] if DATA_PARTITION else [64]
 configsWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
-    for BM in [128] # 128 with data partitioning, 64 with grid partitioning
+    for BM in BMIter # 128 with data partitioning, 64 with grid partitioning
     for BN in [128]
     for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2]
-    for dec in [24] #[32, 40, 48] 32,240 hangs, 24, 240 works 40, 232 works
-    for inc in [240] #[240, 232, 224] 40, 240 hangs
+    for dec, inc in [(24, 240), (40, 232)] #32,240 hangs, 24, 240 works 40, 232 works
+]
+configsOrig = [
+    triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
+    for BM in [64, 128]
+    for BN in [64, 128]
+    for s in [3, 4, 7]
+    for w in [4, 8]
 ]
 configsNoWS = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=0, num_consumer_groups=0)
@@ -200,14 +209,13 @@ configsNoWS = [
 ]
 configsTma = [
     triton.Config({"BLOCK_M": BM, "BLOCK_N": BN}, num_stages=s, num_warps=w, num_buffers_warp_spec=buf, num_consumer_groups=grp, reg_dec_producer=dec, reg_inc_consumer=inc)
-    for BM in [128] # 128 with data partitioning, 64 with grid partitioning
+    for BM in BMIter # 128 with data partitioning, 64 with grid partitioning
     for BN in [128]
-    for s in [0] # change to 2 if firstDot or secondDot
+    for s in [2] # change to 2 if firstDot or secondDot
     for w in [4]
     for buf in [2]
     for grp in [2] # 2
-    for dec in [24] #[32, 40, 48]
-    for inc in [240] #[224, 232, 240]
+    for dec, inc in [(24, 240)] #, (40, 232)] #32,240 hangs, 24, 240 works 40, 232 works
 ]
 
 def keep(conf):
@@ -592,7 +600,7 @@ def _attn_fwd_inner_tma(
     else:
         lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
-    for start_n in tl.range(lo, hi, BLOCK_N):#, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
+    for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl._experimental_descriptor_load(  # load in row major
@@ -1140,7 +1148,7 @@ class _attention(torch.autograd.Function):
         grid = lambda args: (
             # grid partitioning: num_consumer_groups * BLOCK_M
             # data partitioning: BLOCK_M
-            triton.cdiv(q.shape[2], args["BLOCK_M"]), # num_consumer_groups, or 1 for debugging
+            triton.cdiv(q.shape[2], (1 if DATA_PARTITION else 2) * args["BLOCK_M"]), # num_consumer_groups, or 1 for debugging
             q.shape[0] * q.shape[1],
             1,
         )
@@ -1464,7 +1472,7 @@ class _attention_tma(torch.autograd.Function):
                 q.data_ptr(),
                 BATCH * H * N_CTX,
                 HEAD_DIM_Q,
-                META["BLOCK_M"] // 2, # data partitioning: halve
+                META["BLOCK_M"] // (2 if DATA_PARTITION else 1), # data partitioning: halve
                 HEAD_DIM_Q,
                 q.element_size(),
             )
@@ -1473,14 +1481,14 @@ class _attention_tma(torch.autograd.Function):
                 o.data_ptr(),
                 BATCH * H * N_CTX,
                 HEAD_DIM_Q,
-                META["BLOCK_M"] // 2, # data partitioning: halve
+                META["BLOCK_M"] // (2 if DATA_PARTITION else 1), # data partitioning: halve
                 HEAD_DIM_Q,
                 o.element_size(),
             )
             return (
                 # grid partitioning: num_consumer_groups * BLOCK_M
                 # data partitioning: BLOCK_M
-                triton.cdiv(q.shape[2], META["BLOCK_M"]), # num_consumer_groups
+                triton.cdiv(q.shape[2], (1 if DATA_PARTITION else 2)*META["BLOCK_M"]), # num_consumer_groups
                 q.shape[0] * q.shape[1],
                 1,
             )
