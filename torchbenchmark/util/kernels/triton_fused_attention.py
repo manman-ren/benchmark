@@ -148,32 +148,36 @@ def _attn_fwd_inner(
     for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        k = tl.load(K_block_ptr)
-        qk = tl.dot(q, k)
-        if STAGE == 2:
-            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
-            m_ij = tl.maximum(m_i, tl.max(qk, 1))
-            qk -= m_ij[:, None]
-        else:
-            m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-            qk = qk * qk_scale - m_ij[:, None]
-        p = tl.math.exp2(qk)
-        l_ij = tl.sum(p, 1)
-        # -- update m_i and l_i
-        alpha = tl.math.exp2(m_i - m_ij)
-        l_i = l_i * alpha + l_ij
-        # -- update output accumulator --
-        acc = acc * alpha[:, None]
-        # update acc
-        v = tl.load(V_block_ptr)
-        if fp8_v:
-            p = p.to(tl.float8e5)
-        else:
-            p = p.to(tl.bfloat16)
-        acc = tl.dot(p, v, acc)
-        # update m_i and l_i
-        m_i = m_ij
+        with tl.async_task([0]):
+            k = tl.load(K_block_ptr)
+        with tl.async_task([1, 2]):
+            qk = tl.dot(q, k)
+            if STAGE == 2:
+                mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+                qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
+                m_ij = tl.maximum(m_i, tl.max(qk, 1))
+                qk -= m_ij[:, None]
+            else:
+                m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+                qk = qk * qk_scale - m_ij[:, None]
+            p = tl.math.exp2(qk)
+            l_ij = tl.sum(p, 1)
+            # -- update m_i and l_i
+            alpha = tl.math.exp2(m_i - m_ij)
+            l_i = l_i * alpha + l_ij
+            # -- update output accumulator --
+            acc = acc * alpha[:, None]
+            # update acc
+        with tl.async_task([0]):
+            v = tl.load(V_block_ptr)
+        with tl.async_task([1, 2]):
+            if fp8_v:
+                p = p.to(tl.float8e5)
+            else:
+                p = p.to(tl.bfloat16)
+            acc = tl.dot(p, v, acc)
+            # update m_i and l_i
+            m_i = m_ij
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
@@ -311,7 +315,8 @@ def _attn_fwd(
     qk_scale = sm_scale
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
-    q = tl.load(Q_block_ptr)
+    with tl.async_task([0]):
+        q = tl.load(Q_block_ptr)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -357,11 +362,12 @@ def _attn_fwd(
             V.dtype.element_ty == tl.float8e5,  #
         )
     # epilogue
-    m_i += tl.math.log2(l_i)
-    acc = acc / l_i[:, None]
-    m_ptrs = M + off_hz * N_CTX + offs_m
-    tl.store(m_ptrs, m_i)
-    tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+    with tl.async_task([1, 2]):
+        m_i += tl.math.log2(l_i)
+        acc = acc / l_i[:, None]
+        m_ptrs = M + off_hz * N_CTX + offs_m
+        tl.store(m_ptrs, m_i)
+        tl.store(O_block_ptr, acc.to(Out.type.element_ty))
 
 
 @triton.jit
@@ -603,52 +609,56 @@ def _attn_fwd_inner_tma(
     for start_n in tl.range(lo, hi, BLOCK_N, loop_schedule='FA_secondDot'): # FA_firstDot FA_secondDot
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        k = tl._experimental_descriptor_load(  # load in row major
-            K_desc_ptr,
-            [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0],
-            [BLOCK_N, HEAD_DIM],
-            Q.dtype.element_ty,
-        )
-        k = tl.trans(k)
-        qk = tl.dot(q, k)
-        if STAGE == 2:
-            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
-            m_ij = tl.maximum(m_i, tl.max(qk, 1))
-            qk -= m_ij[:, None]
-        else:
-            m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-            qk = qk * qk_scale - m_ij[:, None]
-        p = tl.math.exp2(qk)
-        l_ij = tl.sum(p, 1)
-        # -- update m_i and l_i
-        alpha = tl.math.exp2(m_i - m_ij)
-        l_i = l_i * alpha + l_ij
-        # -- update output accumulator --
-        acc = acc * alpha[:, None]
-        # update acc
-        if fp8_v:
-            v = tl._experimental_descriptor_load(  # load in row major
-                V_desc_ptr,
-                [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)],
-                [HEAD_DIM, BLOCK_N],
-                Q.dtype.element_ty,
-            )
-            v = tl.trans(v)
-        else:
-            v = tl._experimental_descriptor_load(  # load in row major
-                V_desc_ptr,
-                [(qvk_offset // stride_vk + start_n).to(tl.int32), 0],
+        with tl.async_task([0]):
+            k = tl._experimental_descriptor_load(  # load in row major
+                K_desc_ptr,
+                [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0],
                 [BLOCK_N, HEAD_DIM],
                 Q.dtype.element_ty,
             )
-        if fp8_v:
-            p = p.to(tl.float8e5)
-        else:
-            p = p.to(tl.bfloat16)
-        acc = tl.dot(p, v, acc)
-        # update m_i and l_i
-        m_i = m_ij
+        with tl.async_task([1, 2]):
+            k = tl.trans(k)
+            qk = tl.dot(q, k)
+            if STAGE == 2:
+                mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+                qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
+                m_ij = tl.maximum(m_i, tl.max(qk, 1))
+                qk -= m_ij[:, None]
+            else:
+                m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+                qk = qk * qk_scale - m_ij[:, None]
+            p = tl.math.exp2(qk)
+            l_ij = tl.sum(p, 1)
+            # -- update m_i and l_i
+            alpha = tl.math.exp2(m_i - m_ij)
+            l_i = l_i * alpha + l_ij
+            # -- update output accumulator --
+            acc = acc * alpha[:, None]
+        # update acc
+        with tl.async_task([0]):
+            if fp8_v:
+                v = tl._experimental_descriptor_load(  # load in row major
+                    V_desc_ptr,
+                    [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)],
+                    [HEAD_DIM, BLOCK_N],
+                    Q.dtype.element_ty,
+                )
+            else:
+                v = tl._experimental_descriptor_load(  # load in row major
+                    V_desc_ptr,
+                    [(qvk_offset // stride_vk + start_n).to(tl.int32), 0],
+                    [BLOCK_N, HEAD_DIM],
+                    Q.dtype.element_ty,
+                )
+        with tl.async_task([1, 2]):
+            if fp8_v:
+                v = tl.trans(v)
+                p = p.to(tl.float8e5)
+            else:
+                p = p.to(tl.bfloat16)
+            acc = tl.dot(p, v, acc)
+            # update m_i and l_i
+            m_i = m_ij
     return acc, l_i, m_i
 
 
@@ -725,12 +735,13 @@ def _attn_fwd_tma(  # Q, V, desc_k, desc_v, sm_scale, M, Out,  #
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
     # q = tl.load(Q_block_ptr)
-    q = tl._experimental_descriptor_load(  # load in row major
-        desc_q,
-        [(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0],
-        [BLOCK_M, HEAD_DIM],
-        Q.dtype.element_ty,
-    )
+    with tl.async_task([0]):
+        q = tl._experimental_descriptor_load(  # load in row major
+            desc_q,
+            [(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0],
+            [BLOCK_M, HEAD_DIM],
+            Q.dtype.element_ty,
+        )
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -786,17 +797,17 @@ def _attn_fwd_tma(  # Q, V, desc_k, desc_v, sm_scale, M, Out,  #
             V.dtype.element_ty == tl.float8e5,  #
         )
     # epilogue
-    m_i += tl.math.log2(l_i)
-    acc = acc / l_i[:, None]
-    m_ptrs = M + off_hz * N_CTX + offs_m
-    tl.store(m_ptrs, m_i)
-    #tl.device_print("tma", acc.to(Out.type.element_ty))
-    tl._experimental_descriptor_store(
-        desc_o,
-        acc.to(Out.type.element_ty),
-        [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
-    )
-    # tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+    with tl.async_task([1, 2]):
+        m_i += tl.math.log2(l_i)
+        acc = acc / l_i[:, None]
+        m_ptrs = M + off_hz * N_CTX + offs_m
+        tl.store(m_ptrs, m_i)
+        #tl.device_print("tma", acc.to(Out.type.element_ty))
+        tl._experimental_descriptor_store(
+            desc_o,
+            acc.to(Out.type.element_ty),
+            [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
+        )
 
 
 @triton.jit
